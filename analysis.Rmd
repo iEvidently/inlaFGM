@@ -1,14 +1,21 @@
-# Geostatistical data. FGM in The Gambia
+---
+title: "FGM in Nigeria"
+output:
+  html_document:
+    df_print: paged
+---
 
 ##1 Load libraries
+```{r setup, include=TRUE, echo=FALSE}
 library(tidyverse)
 library(leaflet)
 library(raster)
 library(INLA)
 library(rgdal)
-
+```
 
 ##2 Data preparation
+```{r data, cache=TRUE}
 nig <- read_csv("https://raw.githubusercontent.com/iEvidently/inlaFGM/master/nigData.csv") 
 
 d <- nig %>%
@@ -20,25 +27,26 @@ coo <- cbind(d$lng, d$lat)
 nigShp <- getData(name = 'GADM', country = 'NGA', level = 2)
 
 r <- getData(name = 'alt', country = 'NGA', mask = TRUE)
-ra <- aggregate(r, fact = 25, fun = mean)
+ra <- aggregate(r, fact = 5, fun = mean)
 dp <- rasterToPoints(ra)
 coop <- dp[, c("x", "y")]
-
+```
 
 
 
 ##3 Build mesh
-
+```{r mesh, cache=TRUE}
 mesh <- inla.mesh.2d(loc = coo, max.edge = 2, cutoff = 0.5)
 
 mesh$n
 
 plot(mesh)
 points(coo, col = "red")
-
+```
 
 
 ##4 Build the SPDE model on the mesh
+```{r spde, cache=TRUE}
 spde <- inla.spde2.matern(mesh = mesh, alpha = 2)
 
 
@@ -49,9 +57,10 @@ lengths(indexs)
 A <- inla.spde.make.A(mesh = mesh, loc = coo)
 
 Ap <- inla.spde.make.A(mesh = mesh, loc = coop)
-
+```
 
 ## 5 Stack data for the estimation and prediction
+```{r stack, cache=TRUE}
 X <- data.frame(b0 = 1,
                 age = d[, "age"], 
                 muslim = d[, "muslim"],
@@ -78,14 +87,19 @@ stk.p <- inla.stack(tag = "pred",
 
 stk.full <- inla.stack(stk.e, stk.p)
 
-
+```
 
 
 
 
 ##6 Model formula
-
-formula <- OBS ~ 0 + b0 + age + muslim + yoruba + igbo + nc + nw + se + ss + sw +  f(s, model = spde)
+```{r model, echo=FALSE, cache=TRUE}
+formula <- OBS ~ 0 + b0 + muslim + yoruba + igbo + nc + nw + se + ss + sw + 
+ f(age, model = "rw2")
+ f(s, model = spde)
+f(commune, model="iid", param = c(1,0.01)) +
+f(state, model="iid", param = c(1,0.01)) +
+f(s, model = spde)
 
  
 res = inla(formula,
@@ -101,18 +115,19 @@ res = inla(formula,
            control.results = list(return.marginals.random = TRUE,
                                   return.marginals.predictor = TRUE),
            control.compute=list(dic = TRUE, cpo = TRUE, waic = TRUE, config = TRUE)) 
-
+```
 
 
 ##7 Results
-
+```{r results, echo=FALSE, cache=TRUE}
 summary(res)
+```
 
 
 
 
 ##8 Mapping FGM prevalence
-
+```{r map, cache=TRUE}
 index <- inla.stack.index(stack = stk.full, tag = "pred")$data
 
 prev_mean <- res$summary.fitted.values[index, "mean"]
@@ -129,4 +144,6 @@ leaflet() %>% addProviderTiles(providers$CartoDB.Positron) %>%
   addRasterImage(r_prev_mean, colors = pal, opacity = 0.5) %>%
   addLegend("bottomright", pal = pal, values = values(r_prev_mean), title = "Prevalence") %>%
   addScaleBar(position = c("bottomleft"))
+```
+
 
